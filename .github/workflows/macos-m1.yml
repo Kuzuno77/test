@@ -1,0 +1,73 @@
+name: Apple Silicon M1 macOS Sonoma
+
+on:
+  workflow_dispatch:
+
+jobs:
+  macos-m1:
+    runs-on: macos-14
+    timeout-minutes: 360
+
+    steps:
+      - name: Verify Apple Silicon Hardware
+        run: |
+          echo "=== CPU ARCHITECTURE ==="
+          uname -m
+          sysctl -n machdep.cpu.brand_string
+          sw_vers
+
+      - name: Setup macOS Screen Sharing & VNC
+        run: |
+          echo "==> Configuring VNC User..."
+          sudo dscl . -create /Users/kuzuno
+          sudo dscl . -create /Users/kuzuno UserShell /bin/zsh
+          sudo dscl . -create /Users/kuzuno RealName "Kuzuno"
+          sudo dscl . -create /Users/kuzuno UniqueID 501
+          sudo dscl . -create /Users/kuzuno PrimaryGroupID 20
+          sudo dscl . -create /Users/kuzuno NFSHomeDirectory /Users/kuzuno
+          sudo mkdir -p /Users/kuzuno
+          sudo chown -R kuzuno:staff /Users/kuzuno
+
+          sudo dscl . -passwd /Users/kuzuno "Kuzuno2026!"
+          sudo dscl . -append /Groups/admin GroupMembership kuzuno
+
+          echo "==> Activating ARDAgent VNC..."
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on -users kuzuno -privs -all -restart -agent
+
+      - name: Setup noVNC Web Interface
+        run: |
+          echo "==> Downloading noVNC..."
+          git clone https://github.com/novnc/noVNC.git /tmp/novnc
+          git clone https://github.com/kanaka/websockify /tmp/novnc/utils/websockify
+          cp /tmp/novnc/vnc.html /tmp/novnc/index.html
+
+      - name: Launch noVNC and Cloudflare Tunnel
+        run: |
+          echo "==> Installing cloudflared..."
+          brew install cloudflared
+
+          echo "==> Starting websockify..."
+          python3 /tmp/novnc/utils/launch.py --vnc localhost:5900 --listen 6080 &
+          sleep 3
+
+          echo "==> Starting Cloudflare Tunnel..."
+          cloudflared tunnel --url http://localhost:6080 2>&1 | tee /tmp/cloudflared.log &
+
+          echo "Waiting for tunnel URL..."
+          for i in {1..30}; do
+            URL=$(grep -oE "https://[a-zA-Z0-9-]+\.trycloudflare\.com" /tmp/cloudflared.log | head -n 1)
+            if [ -n "$URL" ]; then
+              echo "==============================================================="
+              echo ">>> YOUR APPLE SILICON M1 MACOS DESKTOP IS READY! <<<"
+              echo ">>> LINK: $URL"
+              echo ">>> USERNAME: kuzuno"
+              echo ">>> PASSWORD: Kuzuno2026!"
+              echo "==============================================================="
+              break
+            fi
+            sleep 2
+          done
+
+          # Держим сессию активной
+          sleep 21600
